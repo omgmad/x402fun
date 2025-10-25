@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+abstract contract Context {
+    function _msgSender() internal view virtual returns (address) { return msg.sender; }
+}
+
+abstract contract Ownable is Context {
+    address private _owner;
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    constructor() { _transferOwnership(_msgSender()); }
+    function owner() public view virtual returns (address) { return _owner; }
+    modifier onlyOwner() { require(owner() == _msgSender(), "Not owner"); _; }
+    function transferOwnership(address newOwner) public virtual onlyOwner { require(newOwner != address(0), "Zero address"); _transferOwnership(newOwner); }
+    function _transferOwnership(address newOwner) internal virtual { address oldOwner = _owner; _owner = newOwner; emit OwnershipTransferred(oldOwner, newOwner); }
+}
+
+contract ERC20 {
+    string public name;
+    string public symbol;
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+    mapping(address => uint256) public balanceOf;
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    constructor(string memory _name, string memory _symbol) { name = _name; symbol = _symbol; }
+    function _mint(address to, uint256 amount) internal { totalSupply += amount; balanceOf[to] += amount; emit Transfer(address(0), to, amount); }
+}
+
+contract x888 is ERC20, Ownable {
+    uint256 public constant TOKENS_PER_MINT = 5000 * 1e18; // 5000 x888 per 0.0003 ETH
+    uint256 public constant TOTAL_SUPPLY_CAP = 1_000_000_000 * 1e18;
+    uint256 public constant PREMINT_SUPPLY = 100_000_000 * 1e18;
+    uint256 public constant MINT_PRICE = 3e14; // 0.0003 ETH in wei
+
+    event Minted(address indexed user, uint256 ethAmount, uint256 x888Minted);
+    event Withdrawn(address indexed owner, uint256 ethAmount);
+
+    constructor() ERC20("x888", "x888") { _mint(msg.sender, PREMINT_SUPPLY); }
+
+    /**
+     * @notice Mint x888 proportional to ETH sent
+     */
+    function mint() external payable {
+        require(msg.value >= MINT_PRICE, "Send at least 0.0003 ETH");
+
+        uint256 numMints = msg.value / MINT_PRICE; // хэр олон 0.0003 ETH орсон
+        uint256 mintAmount = TOKENS_PER_MINT * numMints;
+
+        require(totalSupply + mintAmount <= TOTAL_SUPPLY_CAP, "Max supply reached");
+
+        _mint(msg.sender, mintAmount);
+
+        emit Minted(msg.sender, msg.value, mintAmount);
+    }
+
+    function withdrawETH(uint256 amount) external onlyOwner {
+        require(address(this).balance >= amount, "Insufficient ETH");
+        payable(owner()).transfer(amount);
+        emit Withdrawn(owner(), amount);
+    }
+
+    function withdrawAllETH() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No ETH to withdraw");
+        payable(owner()).transfer(balance);
+        emit Withdrawn(owner(), balance);
+    }
+}
