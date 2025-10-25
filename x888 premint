@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title x888 Token Mint Contract (Base Sepolia Testnet)
+ * @notice Users send USDC → receive 5000 x888 per 1 USDC
+ * @dev 10% pre-mint to owner, total supply = 1,000,000,000 x888
+ */
+
+interface IERC20 {
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+}
+
+abstract contract Context {
+    function _msgSender() internal view virtual returns (address) {
+        return msg.sender;
+    }
+}
+
+abstract contract Ownable is Context {
+    address private _owner;
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    constructor() {
+        _transferOwnership(_msgSender());
+    }
+
+    function owner() public view virtual returns (address) {
+        return _owner;
+    }
+
+    modifier onlyOwner() {
+        require(owner() == _msgSender(), "Not owner");
+        _;
+    }
+
+    function transferOwnership(address newOwner) public virtual onlyOwner {
+        require(newOwner != address(0), "Zero address");
+        _transferOwnership(newOwner);
+    }
+
+    function _transferOwnership(address newOwner) internal virtual {
+        address oldOwner = _owner;
+        _owner = newOwner;
+        emit OwnershipTransferred(oldOwner, newOwner);
+    }
+}
+
+contract ERC20 {
+    string public name;
+    string public symbol;
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+
+    constructor(string memory _name, string memory _symbol) {
+        name = _name;
+        symbol = _symbol;
+    }
+
+    function _transfer(address from, address to, uint256 amount) internal {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        emit Transfer(from, to, amount);
+    }
+
+    function _mint(address to, uint256 amount) internal {
+        totalSupply += amount;
+        balanceOf[to] += amount;
+        emit Transfer(address(0), to, amount);
+    }
+}
+
+contract x888 is ERC20, Ownable {
+    IERC20 public usdc;
+    uint256 public constant TOKENS_PER_USDC = 5000 * 1e18;
+    uint256 public constant TOTAL_SUPPLY_CAP = 1_000_000_000 * 1e18;
+    uint256 public constant PREMINT_SUPPLY = 100_000_000 * 1e18;
+    uint256 public constant USDC_DECIMALS = 1_000_000; // 1 USDC = 1e6 (6 decimals)
+
+    event Minted(address indexed user, uint256 usdcAmount, uint256 x888Minted);
+    event Withdrawn(address indexed owner, uint256 usdcAmount);
+
+    constructor() ERC20("x888", "x888") {
+        // ✅ Base Sepolia USDC address
+        usdc = IERC20(address(0x036CbD53842c5426634e7929541eC2318f3dCF7e));
+        _mint(msg.sender, PREMINT_SUPPLY); // 10% pre-mint to owner
+    }
+
+    /**
+     * @notice Mint x888 proportional to USDC sent
+     * @param usdcAmount Amount of USDC (6 decimals)
+     */
+    function mint(uint256 usdcAmount) external {
+        require(usdcAmount > 0, "Must send USDC > 0");
+
+        // x888 = 5000 x888 per 1 USDC
+        uint256 mintAmount = (TOKENS_PER_USDC * usdcAmount) / USDC_DECIMALS;
+        require(totalSupply + mintAmount <= TOTAL_SUPPLY_CAP, "Max supply reached");
+
+        require(usdc.transferFrom(msg.sender, address(this), usdcAmount), "USDC transfer failed");
+        _mint(msg.sender, mintAmount);
+
+        emit Minted(msg.sender, usdcAmount, mintAmount);
+    }
+
+    function withdrawUSDC(uint256 amount) external onlyOwner {
+        require(usdc.transfer(owner(), amount), "Withdraw failed");
+        emit Withdrawn(owner(), amount);
+    }
+
+    function withdrawAllUSDC() external onlyOwner {
+        uint256 balance = usdc.balanceOf(address(this));
+        require(usdc.transfer(owner(), balance), "Withdraw failed");
+        emit Withdrawn(owner(), balance);
+    }
+}
