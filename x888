@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title x888 Token Mint Contract for Base chain
+ * @notice Users send 0.01 USDC → receive 5000 x888 per mint
+ * @dev Max 200,000 mints, owner can withdraw USDC anytime
+ */
+
+interface IERC20 {
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+}
+
+abstract contract Context {
+    function _msgSender() internal view virtual returns (address) {
+        return msg.sender;
+    }
+}
+
+abstract contract Ownable is Context {
+    address private _owner;
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    constructor() {
+        _transferOwnership(_msgSender());
+    }
+
+    function owner() public view virtual returns (address) {
+        return _owner;
+    }
+
+    modifier onlyOwner() {
+        require(owner() == _msgSender(), "Not owner");
+        _;
+    }
+
+    function transferOwnership(address newOwner) public virtual onlyOwner {
+        require(newOwner != address(0), "Zero address");
+        _transferOwnership(newOwner);
+    }
+
+    function _transferOwnership(address newOwner) internal virtual {
+        address oldOwner = _owner;
+        _owner = newOwner;
+        emit OwnershipTransferred(oldOwner, newOwner);
+        _owner = newOwner;
+    }
+}
+
+contract ERC20 {
+    string public name;
+    string public symbol;
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+
+    constructor(string memory _name, string memory _symbol) {
+        name = _name;
+        symbol = _symbol;
+    }
+
+    function _transfer(address from, address to, uint256 amount) internal {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        emit Transfer(from, to, amount);
+    }
+
+    function _mint(address to, uint256 amount) internal {
+        totalSupply += amount;
+        balanceOf[to] += amount;
+        emit Transfer(address(0), to, amount);
+    }
+}
+
+contract x888 is ERC20, Ownable {
+    IERC20 public usdc;
+    uint256 public constant TOKENS_PER_MINT = 5000 * 1e18;
+    uint256 public constant MAX_SUPPLY = 1_000_000_000 * 1e18;
+    uint256 public constant MAX_MINTS = 200_000;
+    uint256 public constant USDC_PER_MINT = 10_000; // 0.01 USDC (USDC decimals = 6)
+
+    uint256 public mintCount;
+
+    event Minted(address indexed user, uint256 usdcAmount, uint256 x888Minted);
+    event Withdrawn(address indexed owner, uint256 usdcAmount);
+
+    constructor(address _usdc) ERC20("x888", "x888") {
+        usdc = IERC20(_usdc);
+    }
+
+    function mint() external {
+        require(mintCount + 1 <= MAX_MINTS, "Max mints reached");
+        require(totalSupply + TOKENS_PER_MINT <= MAX_SUPPLY, "Max supply reached");
+        require(usdc.transferFrom(msg.sender, address(this), USDC_PER_MINT), "USDC transfer failed");
+
+        _mint(msg.sender, TOKENS_PER_MINT);
+        mintCount += 1;
+
+        emit Minted(msg.sender, USDC_PER_MINT, TOKENS_PER_MINT);
+    }
+
+    function withdrawUSDC(uint256 amount) external onlyOwner {
+        require(usdc.transfer(owner(), amount), "Withdraw failed");
+        emit Withdrawn(owner(), amount);
+    }
+
+    function withdrawAllUSDC() external onlyOwner {
+        uint256 balance = usdc.balanceOf(address(this));
+        require(usdc.transfer(owner(), balance), "Withdraw failed");
+        emit Withdrawn(owner(), balance);
+    }
+}
